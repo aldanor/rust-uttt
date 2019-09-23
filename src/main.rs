@@ -30,8 +30,37 @@ pub const ALL_FIELDS: Bits = 0o777;
 #[derive(Copy, Clone, Default)]
 pub struct Pos {
     pub field: Index,
-    pub all_legal: bool,
     pub square: Bits,
+}
+
+#[derive(Copy, Clone)]
+pub struct Move {
+    pos: Pos,
+    valid_field: Option<Index>,
+    field_status: FieldStatus,
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+pub enum FieldStatus {
+    Tied,
+    Won(Index),
+    None,
+}
+
+impl FieldStatus {
+    pub fn blocked(self) -> bool {
+        self != FieldStatus::None
+    }
+
+    pub fn won(self, p: usize) -> bool {
+        self == FieldStatus::Won(p as _)
+    }
+}
+
+impl Default for FieldStatus {
+    fn default() -> Self {
+        FieldStatus::None
+    }
 }
 
 #[derive(Copy, Clone, Debug, Default)]
@@ -39,6 +68,7 @@ pub struct Bitboard {
     pub valid_field: Option<Index>,
     pub board: [[Bits; 9]; 2],
     pub turn: usize,
+    field_status: [FieldStatus; 9],
     meta_field: Option<[Bits; 2]>,
     game_over: Option<bool>,
 }
@@ -63,41 +93,48 @@ impl Bitboard {
         (self.get(0, field), self.get(1, field))
     }
 
-    pub fn make_move(&mut self, mov: Pos) {
-        *self.get_mut(self.turn, mov.field) |= mov.square;
-        self.valid_field = if self.field_is_blocked(mov.field) {
-            None
+    pub fn make_move(&mut self, pos: Pos) {
+        let other = self.get(1 - self.turn, pos.field);
+        let square = self.get_mut(self.turn, pos.field);
+        *square |= pos.square;
+        if is_won(*square) {
+            self.field_status[pos.field as usize] = FieldStatus::Won(self.turn as _);
+            self.valid_field = None;
+        } else if is_tied(*square | other) {
+            self.field_status[pos.field as usize] = FieldStatus::Tied;
+            self.valid_field = None;
         } else {
-            Some(mov.square.trailing_zeros() as _)
-        };
+            self.valid_field = Some(pos.square.trailing_zeros() as _);
+        }
         self.turn = 1 - self.turn;
         self.dirty();
     }
 
-    pub fn get_all_moves(&self, moves: &mut Vec<Pos>) -> usize {
-        let all_legal = self.valid_field.is_none();
-        let mut n_moves = 0;
-        let available_fields = match self.valid_field {
+    pub fn get_all_moves(&self, moves: &mut Vec<Move>) -> usize {
+        let valid_field = self.valid_field;
+        let available_fields = match valid_field {
             Some(field) => field..field + 1,
             _ => 0..9,
         };
+        let mut n_moves = 0;
         for field in available_fields {
-            let (white, black) = self.get_fields(field);
-            let any = white | black;
-            let blocked = is_won(white) | is_won(black) | is_tied(any);
-            if blocked {
+            let field_status = self.field_status[field as usize];
+            if field_status.blocked() {
                 continue;
             }
+            let (white, black) = self.get_fields(field);
+            let any = white | black;
             for square in 0..9 {
                 let square = 1 << square;
                 let taken = any & square != 0;
                 if taken {
                     continue;
                 }
-                moves.push(Pos {
-                    field,
-                    all_legal,
-                    square,
+                let pos = Pos { field, square };
+                moves.push(Move {
+                    pos,
+                    valid_field,
+                    field_status,
                 });
                 n_moves += 1;
             }
@@ -105,16 +142,13 @@ impl Bitboard {
         n_moves
     }
 
-    pub fn undo_move(&mut self, mov: Pos) {
-        *self.get_mut(1 - self.turn, mov.field) &= !mov.square;
-        self.valid_field = if mov.all_legal { None } else { Some(mov.field) };
+    pub fn undo_move(&mut self, mov: &Move) {
+        let pos = mov.pos;
+        *self.get_mut(1 - self.turn, pos.field) &= !pos.square;
+        self.valid_field = mov.valid_field;
+        self.field_status[pos.field as usize] = mov.field_status;
         self.turn = 1 - self.turn;
         self.dirty();
-    }
-
-    fn field_is_blocked(&self, field: Index) -> bool {
-        let (white, black) = self.get_fields(field);
-        is_won(white) || is_won(black) || is_tied(white | black)
     }
 
     pub fn get_meta_field(&mut self) -> [u16; 2] {
@@ -124,7 +158,7 @@ impl Bitboard {
         let mut field = [0; 2];
         for p in 0..2 {
             field[p] = (0..9)
-                .map(|i| (is_won(self.board[p][i]) as u16) << (8 - i as u16))
+                .map(|i| (self.field_status[i].won(p) as u16) << (8 - i as u16))
                 .fold(0, |x, y| x | y);
         }
         self.meta_field = Some(field);
@@ -146,11 +180,7 @@ impl Bitboard {
     }
 
     pub fn game_tied(&self) -> bool {
-        (0..9).all(|i| {
-            is_won(self.board[0][i])
-                || is_won(self.board[1][i])
-                || is_tied(self.board[0][i] | self.board[1][i])
-        })
+        (0..9).all(|i| self.field_status[i].blocked())
     }
 }
 
@@ -162,7 +192,7 @@ pub fn is_won(field: Bits) -> bool {
     WIN.iter().any(|&w| field & w == w)
 }
 
-pub fn move_gen_impl(board: &mut Bitboard, depth: usize, moves: &mut Vec<Pos>) -> usize {
+pub fn move_gen_impl(board: &mut Bitboard, depth: usize, moves: &mut Vec<Move>) -> usize {
     if board.game_over() {
         return 0;
     } else {
@@ -171,9 +201,9 @@ pub fn move_gen_impl(board: &mut Bitboard, depth: usize, moves: &mut Vec<Pos>) -
         if depth > 0 {
             for _ in 1..=n_moves {
                 let mov = moves.pop().unwrap();
-                board.make_move(mov);
+                board.make_move(mov.pos);
                 let n = move_gen_impl(board, depth - 1, moves);
-                board.undo_move(mov);
+                board.undo_move(&mov);
                 sum += n;
             }
         } else {
