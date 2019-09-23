@@ -22,20 +22,12 @@ where
     );
 }
 
-// bitboard.rs
-pub const WHITE: usize = 0; // X
-pub const BLACK: usize = 1; // O
-
 pub const FIELD: usize = 0x1FF << 16;
 pub const SQUARE: usize = 0xFFFF;
 pub const ALL_FIELDS_LEGAL: usize = 0x1 << 25;
 
-pub const DIAGS: [usize; 2] = [0o421, 0o124];
-pub const ROWS: [usize; 3] = [0o700, 0o070, 0o007];
-pub const COLS: [usize; 3] = [0o111, 0o222, 0o444];
+pub const WIN: [usize; 8] = [0o421, 0o124, 0o700, 0o070, 0o007, 0o111, 0o222, 0o444];
 pub const ALL_FIELDS: usize = 0o777;
-
-pub const USIZE: u32 = (std::mem::size_of::<usize>() * 8 - 1) as u32;
 
 #[macro_export]
 macro_rules! field {
@@ -136,8 +128,8 @@ impl Bitboard {
     }
 
     fn field_is_blocked(&self, field: usize) -> bool {
-        let white_field = self.board[WHITE][field];
-        let black_field = self.board[BLACK][field];
+        let white_field = self.board[0][field];
+        let black_field = self.board[1][field];
         is_won(white_field) || is_won(black_field) || is_tied(white_field | black_field)
     }
 
@@ -145,18 +137,11 @@ impl Bitboard {
         if !self.cached_meta_field_dirty {
             return self.cached_meta_field;
         }
-
-        let mut field: [usize; 2] = [0; 2];
+        let mut field = [0; 2];
         for p in 0..2 {
-            field[p] = (is_won(self.board[p][0]) as usize) << 8
-                | (is_won(self.board[p][1]) as usize) << 7
-                | (is_won(self.board[p][2]) as usize) << 6
-                | (is_won(self.board[p][3]) as usize) << 5
-                | (is_won(self.board[p][4]) as usize) << 4
-                | (is_won(self.board[p][5]) as usize) << 3
-                | (is_won(self.board[p][6]) as usize) << 2
-                | (is_won(self.board[p][7]) as usize) << 1
-                | (is_won(self.board[p][8]) as usize) << 0;
+            field[p] = (0..9)
+                .map(|i| (is_won(self.board[p][i]) as usize) << (8 - i))
+                .fold(0, |x, y| x | y);
         }
         self.cached_meta_field = field;
         self.cached_meta_field_dirty = false;
@@ -168,15 +153,12 @@ impl Bitboard {
             return self.cached_game_over;
         }
 
-        let mut sum = 0;
-        for i in 0..9 {
-            sum += self.board[0][i].count_ones();
-        }
+        let sum = (0..9).fold(0, |acc, i| acc + self.board[0][i].count_ones());
         if sum < 9 {
             return false;
         }
         let meta_field = self.get_meta_field();
-        let ret = is_won(meta_field[WHITE]) | is_won(meta_field[BLACK]) || self.game_tied();
+        let ret = is_won(meta_field[0]) | is_won(meta_field[1]) || self.game_tied();
         self.cached_game_over = ret;
         self.cached_game_over_dirty = false;
         return ret;
@@ -191,8 +173,8 @@ impl Bitboard {
     }
 }
 
-pub fn to_index(no: usize) -> usize {
-    (USIZE - no.leading_zeros()) as usize
+pub fn to_index(value: usize) -> usize {
+    value.trailing_zeros() as _
 }
 
 pub fn is_tied(field: usize) -> bool {
@@ -200,14 +182,7 @@ pub fn is_tied(field: usize) -> bool {
 }
 
 pub fn is_won(field: usize) -> bool {
-    (field & DIAGS[0]) == DIAGS[0]
-        || (field & DIAGS[1]) == DIAGS[1]
-        || (field & ROWS[0]) == ROWS[0]
-        || (field & ROWS[1]) == ROWS[1]
-        || (field & ROWS[2]) == ROWS[2]
-        || (field & COLS[0]) == COLS[0]
-        || (field & COLS[1]) == COLS[1]
-        || (field & COLS[2]) == COLS[2]
+    WIN.iter().any(|&w| field & w == w)
 }
 
 pub fn move_gen(mut board: Bitboard, depth: usize) -> usize {
