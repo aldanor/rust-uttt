@@ -1,5 +1,7 @@
 use std::time::SystemTime;
 
+use once_cell::sync::Lazy;
+
 fn main() {
     benchmark("movegen", || {
         println!("{}", move_gen(7));
@@ -26,6 +28,12 @@ type Bits = u16;
 
 pub const WIN: [Bits; 8] = [0o421, 0o124, 0o700, 0o070, 0o007, 0o111, 0o222, 0o444];
 pub const ALL_FIELDS: Bits = 0o777;
+
+pub static IS_WON: Lazy<Vec<bool>> = Lazy::new(|| {
+    (0..1024)
+        .map(|field| WIN.iter().any(|&w| field & w == w))
+        .collect()
+});
 
 #[repr(packed)]
 #[derive(Copy, Clone, Default)]
@@ -177,7 +185,7 @@ pub fn is_tied(field: Bits) -> bool {
 }
 
 pub fn is_won(field: Bits) -> bool {
-    WIN.iter().any(|&w| field & w == w)
+    unsafe { *IS_WON.get_unchecked(field as usize) }
 }
 
 pub fn move_gen_impl(board: &mut Bitboard, depth: usize, moves: &mut Vec<Move>) -> usize {
