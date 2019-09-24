@@ -182,17 +182,16 @@ pub fn is_won(field: Bits) -> bool {
 
 pub fn move_gen_impl(board: &mut Bitboard, depth: usize, moves: &mut Vec<Move>) -> usize {
     if board.game_over() {
-        return 0;
+        0
     } else {
         let n_moves = board.get_all_moves(moves);
         let mut sum = n_moves;
         if depth > 0 {
-            for _ in 1..=n_moves {
+            for _ in 0..n_moves {
                 let mov = moves.pop().unwrap();
                 board.make_move(mov.pos);
-                let n = move_gen_impl(board, depth - 1, moves);
+                sum += move_gen_impl(board, depth - 1, moves);
                 board.undo_move(&mov);
-                sum += n;
             }
         } else {
             for _ in 0..n_moves {
