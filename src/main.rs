@@ -128,7 +128,7 @@ impl Bitboard {
         self.turn = 1 - self.turn;
     }
 
-    pub fn get_all_moves(&self, moves: &mut Vec<Move>, push: bool) -> usize {
+    pub fn get_all_moves<F: FnMut(Move)>(&self, mut f: F) -> usize {
         let all_valid = self.valid_field.is_none();
         let available_fields = match self.valid_field {
             Some(field) => field..field + 1,
@@ -151,15 +151,13 @@ impl Bitboard {
                     continue;
                 }
                 let pos = Pos { field, square };
-                if push {
-                    moves.push(Move {
-                        pos,
-                        all_valid,
-                        field_status,
-                        meta_field,
-                        n_blocked,
-                    });
-                }
+                f(Move {
+                    pos,
+                    all_valid,
+                    field_status,
+                    meta_field,
+                    n_blocked,
+                });
                 n_moves += 1;
             }
         }
@@ -190,26 +188,28 @@ pub fn is_won(field: Bits) -> bool {
     unsafe { *IS_WON.get_unchecked(field as usize) }
 }
 
-pub fn move_gen_impl(board: &mut Bitboard, depth: usize, moves: &mut Vec<Move>) -> usize {
+pub fn move_gen_impl(board: &mut Bitboard, depth: usize) -> usize {
     if board.game_over() {
         0
     } else {
-        let n_moves = board.get_all_moves(moves, depth > 0);
-        let mut sum = n_moves;
+        let mut sum = 0;
         if depth > 0 {
-            for _ in 0..n_moves {
-                let mov = moves.pop().unwrap();
-                board.make_move(mov.pos);
-                sum += move_gen_impl(board, depth - 1, moves);
-                board.undo_move(&mov);
-            }
+            let board_copy = board.clone();
+            let n_moves = board_copy.get_all_moves(|mov| {
+                if depth > 0 {
+                    board.make_move(mov.pos);
+                    sum += move_gen_impl(board, depth - 1);
+                    board.undo_move(&mov);
+                }
+            });
+            sum + n_moves
+        } else {
+            board.get_all_moves(drop)
         }
-        sum
     }
 }
 
 pub fn move_gen(depth: usize) -> usize {
     let mut bitboard = Default::default();
-    let mut moves = Vec::with_capacity(1 << 16);
-    move_gen_impl(&mut bitboard, depth, &mut moves)
+    move_gen_impl(&mut bitboard, depth)
 }
