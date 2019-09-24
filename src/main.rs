@@ -103,27 +103,47 @@ impl Bitboard {
         (self.get(0, field), self.get(1, field))
     }
 
+    fn get_field_status(&mut self, field: Index) -> FieldStatus {
+        unsafe { *self.field_status.get_unchecked(field as usize) }
+    }
+
+    fn get_meta_field(&mut self, p: usize) -> Bits {
+        unsafe { *self.meta_field.get_unchecked(p) }
+    }
+
+    fn set_field_status(&mut self, field: Index, status: FieldStatus) {
+        unsafe { *self.field_status.get_unchecked_mut(field as usize) = status };
+    }
+
+    fn set_meta_field(&mut self, p: usize, meta_field: Bits) {
+        unsafe { *self.meta_field.get_unchecked_mut(p) = meta_field };
+    }
+
     pub fn make_move(&mut self, pos: Pos) {
-        let other = self.get(1 - self.turn, pos.field);
         let square = self.get_mut(self.turn, pos.field);
         *square |= pos.square;
-        if is_won(*square) {
-            self.field_status[pos.field as usize] = unsafe { std::mem::transmute(self.turn as u8) };
+        let square = *square;
+        if is_won(square) {
+            self.set_field_status(pos.field, unsafe { std::mem::transmute(self.turn as u8) });
             self.valid_field = None;
-            self.meta_field[self.turn] |= 1 << pos.field as Bits;
+            let meta = self.get_meta_field(self.turn) | (1 << pos.field as Bits);
+            self.set_meta_field(self.turn, meta);
             self.n_blocked += 1;
-            if self.n_blocked == 9 || is_won(self.meta_field[self.turn]) {
-                self.game_over = true;
-            }
-        } else if is_tied(*square | other) {
-            self.field_status[pos.field as usize] = FieldStatus::Tied;
-            self.valid_field = None;
-            self.n_blocked += 1;
-            if self.n_blocked == 9 {
+            if self.n_blocked == 9 || is_won(meta) {
                 self.game_over = true;
             }
         } else {
-            self.valid_field = Some(pos.square.trailing_zeros() as _);
+            let other = self.get(1 - self.turn, pos.field);
+            if is_tied(square | other) {
+                self.set_field_status(pos.field, FieldStatus::Tied);
+                self.valid_field = None;
+                self.n_blocked += 1;
+                if self.n_blocked == 9 {
+                    self.game_over = true;
+                }
+            } else {
+                self.valid_field = Some(pos.square.trailing_zeros() as _);
+            }
         }
         self.turn = 1 - self.turn;
     }
@@ -134,10 +154,10 @@ impl Bitboard {
             Some(field) => field..field + 1,
             _ => 0..9,
         };
-        let meta_field = self.meta_field[self.turn];
+        let meta_field = self.get_meta_field(self.turn);
         let n_blocked = self.n_blocked;
         for field in available_fields {
-            let field_status = self.field_status[field as usize];
+            let field_status = self.get_field_status(field);
             if field_status.blocked() {
                 continue;
             }
@@ -169,8 +189,8 @@ impl Bitboard {
         self.turn = 1 - self.turn;
         *self.get_mut(self.turn, pos.field) &= !pos.square;
         self.valid_field = if mov.all_valid { None } else { Some(pos.field) };
-        self.field_status[pos.field as usize] = mov.field_status;
-        self.meta_field[self.turn] = mov.meta_field;
+        self.set_field_status(pos.field, mov.field_status);
+        self.set_meta_field(self.turn, mov.meta_field);
         self.n_blocked = mov.n_blocked;
         self.game_over = false;
     }
