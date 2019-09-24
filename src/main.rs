@@ -128,7 +128,7 @@ impl Bitboard {
         self.turn = 1 - self.turn;
     }
 
-    pub fn get_all_moves(&self, moves: &mut Vec<Move>) -> usize {
+    pub fn get_all_moves(&self, moves: &mut Vec<Move>, push: bool) -> usize {
         let all_valid = self.valid_field.is_none();
         let available_fields = match self.valid_field {
             Some(field) => field..field + 1,
@@ -151,13 +151,15 @@ impl Bitboard {
                     continue;
                 }
                 let pos = Pos { field, square };
-                moves.push(Move {
-                    pos,
-                    all_valid,
-                    field_status,
-                    meta_field,
-                    n_blocked,
-                });
+                if push {
+                    moves.push(Move {
+                        pos,
+                        all_valid,
+                        field_status,
+                        meta_field,
+                        n_blocked,
+                    });
+                }
                 n_moves += 1;
             }
         }
@@ -192,7 +194,7 @@ pub fn move_gen_impl(board: &mut Bitboard, depth: usize, moves: &mut Vec<Move>) 
     if board.game_over() {
         0
     } else {
-        let n_moves = board.get_all_moves(moves);
+        let n_moves = board.get_all_moves(moves, depth > 0);
         let mut sum = n_moves;
         if depth > 0 {
             for _ in 0..n_moves {
@@ -200,10 +202,6 @@ pub fn move_gen_impl(board: &mut Bitboard, depth: usize, moves: &mut Vec<Move>) 
                 board.make_move(mov.pos);
                 sum += move_gen_impl(board, depth - 1, moves);
                 board.undo_move(&mov);
-            }
-        } else {
-            for _ in 0..n_moves {
-                let _ = moves.pop();
             }
         }
         sum
